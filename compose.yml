@@ -41,8 +41,22 @@ services:
     volumes:
       - kafka-data:/var/lib/kafka/data
 
+  rabbitmq:
+    image: rabbitmq:3-management
+    restart: always
+    ports:
+      - 5672:5672
+      - 15672:15672
+    environment:
+      RABBITMQ_DEFAULT_USER: user
+      RABBITMQ_DEFAULT_PASS: password
+      RABBITMQ_DEFAULT_VHOST: /
+    volumes:
+      - rabbitmq-data:/var/lib/rabbitmq
+
 volumes:
   db-data:
   zoo-data:
   zoo-log:
   kafka-data:
+  rabbitmq-data:
