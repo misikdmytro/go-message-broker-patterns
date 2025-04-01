@@ -38,7 +38,7 @@ func main() {
 
 		rows, err := db.QueryContext(
 			ctx,
-			"SELECT id, type, payload, retry_count, next_attempt_at WHERE next_attempt_at <= ? AND retry_count < ?",
+			"SELECT id, type, payload, retry_count, next_attempt_at FROM message_queue WHERE next_attempt_at <= ? AND retry_count < ?",
 			time.Now(),
 			maxRetries,
 		)
@@ -46,6 +46,9 @@ func main() {
 			log.Printf("Error executing query: %v", err)
 			continue
 		}
+
+		var failed []int64
+		var success []int64
 
 		for rows.Next() {
 			var id int64
@@ -63,19 +66,36 @@ func main() {
 				var orderPayload OrderFullfillmentPayload
 				if err := json.Unmarshal(payload, &orderPayload); err != nil {
 					log.Printf("Error unmarshalling payload: %v", err)
-					scheduleLater(ctx, db, id, retryCount)
+					failed = append(failed, id)
 
 					continue
 				}
 
 				if err := fullfillOrder(ctx, orderPayload); err != nil {
 					log.Printf("Error fulfilling order: %v", err)
-					scheduleLater(ctx, db, id, retryCount)
+					failed = append(failed, id)
 
 					continue
 				}
 
-				markAsCompleted(ctx, db, id)
+				success = append(success, id)
+			}
+		}
+
+		if err := rows.Close(); err != nil {
+			log.Printf("Error closing rows: %v", err)
+		}
+
+		for _, id := range success {
+			if err := markAsCompleted(ctx, db, id); err != nil {
+				log.Printf("Error marking as completed: %v", err)
+				failed = append(failed, id)
+			}
+		}
+
+		for _, id := range failed {
+			if err := scheduleLater(ctx, db, id, maxRetries); err != nil {
+				log.Printf("Error scheduling later: %v", err)
 			}
 		}
 	}
@@ -92,30 +112,25 @@ func fullfillOrder(ctx context.Context, payload OrderFullfillmentPayload) error 
 	return nil
 }
 
-func scheduleLater(ctx context.Context, db *sql.DB, id int64, retryCount int) {
+func scheduleLater(ctx context.Context, db *sql.DB, id int64, retryCount int) error {
 	secondsToRetry := 10 * (retryCount + 1)
 	_, err := db.ExecContext(
 		ctx,
-		"UPDATE outbox SET retry_count = retry_count + 1, next_attempt_at = ?, last_attempt_at = ? WHERE id = ?",
+		"UPDATE message_queue SET retry_count = retry_count + 1, next_attempt_at = ?, last_attempt_at = ? WHERE id = ?",
 		time.Now().Add(time.Duration(secondsToRetry)*time.Second),
 		time.Now(),
 		id,
 	)
 
-	if err != nil {
-		log.Printf("Error updating row: %v", err)
-		return
-	}
+	return err
 }
 
-func markAsCompleted(ctx context.Context, db *sql.DB, id int64) {
+func markAsCompleted(ctx context.Context, db *sql.DB, id int64) error {
 	_, err := db.ExecContext(
 		ctx,
-		"UPDATE outbox SET next_attempt_at = NULL, last_attempt_at = ? WHERE id = ?",
+		"UPDATE message_queue SET next_attempt_at = NULL, last_attempt_at = ? WHERE id = ?",
 		time.Now(),
 		id,
 	)
-	if err != nil {
-		log.Printf("Error deleting row: %v", err)
-	}
+	return err
 }

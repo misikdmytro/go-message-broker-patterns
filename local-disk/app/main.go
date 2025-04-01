@@ -17,7 +17,7 @@ import (
 func ensureSchema(ctx context.Context, db *sql.DB) error {
 	schema := `
 	CREATE TABLE IF NOT EXISTS message_queue (
-		id BIGINTEGER PRIMARY KEY AUTOINCREMENT,
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
 		type TEXT NOT NULL,
 		payload BLOB NOT NULL,
 		retry_count INTEGER DEFAULT 0,
